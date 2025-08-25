@@ -26,8 +26,11 @@ mongoose.connect(process.env.MONGO_URI)
 const userSchema = new mongoose.Schema({
     name: { type: String, required: true },
     email: { type: String, required: true, unique: true },
-    password: { type: String, required: true }, // In a real app, this would be hashed
-    createdAt: { type: Date, default: Date.now }
+    password: { type: String, required: true },
+    createdAt: { type: Date, default: Date.now },
+    // NEW FIELDS FOR PASSWORD RESET
+    passwordResetToken: String,
+    passwordResetExpires: Date,
 });
 
 const User = mongoose.model('User', userSchema);
