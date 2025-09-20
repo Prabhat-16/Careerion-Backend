@@ -145,6 +145,76 @@ app.post('/api/auth/signup', async (req, res) => {
 });
 
 /**
+ * @route   POST /api/auth/google
+ * @desc    Google Sign-In using access_token (OAuth access token flow)
+ *          Expects { token: access_token } from client.
+ *          Fetches profile from Google UserInfo endpoint, then creates/logs in user.
+ */
+app.post('/api/auth/google', async (req, res) => {
+    try {
+        const { token } = req.body;
+        if (!token) {
+            return res.status(400).json({ error: 'Missing Google access token' });
+        }
+
+        // Fetch user info from Google using the access token
+        const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+            headers: {
+                Authorization: `Bearer ${token}`,
+            },
+        });
+
+        if (!response.ok) {
+            const errText = await response.text();
+            return res.status(401).json({ error: 'Invalid Google access token', details: errText });
+        }
+
+        const profile = await response.json();
+        const { email, name, picture } = profile;
+
+        if (!email) {
+            return res.status(400).json({ error: 'Google profile did not include an email' });
+        }
+
+        // Find existing user or create a new one
+        let user = await User.findOne({ email });
+        if (!user) {
+            // For Google users, we still need a password field due to the current schema.
+            // We'll generate a random hash so login by password is not feasible.
+            const randomPassword = Math.random().toString(36).slice(-12) + Date.now().toString(36);
+            const hashedPassword = await bcrypt.hash(randomPassword, 10);
+
+            user = new User({
+                name: name || email.split('@')[0],
+                email,
+                password: hashedPassword,
+            });
+            await user.save();
+        }
+
+        // Create JWT token
+        const jwtToken = jwt.sign(
+            { userId: user._id, email: user.email },
+            process.env.JWT_SECRET || 'your-secret-key',
+            { expiresIn: '7d' }
+        );
+
+        const userResponse = {
+            _id: user._id,
+            name: user.name,
+            email: user.email,
+            createdAt: user.createdAt,
+            avatar: picture,
+        };
+
+        return res.json({ message: 'Google login successful', user: userResponse, token: jwtToken });
+    } catch (error) {
+        console.error('Error in /api/auth/google:', error);
+        return res.status(500).json({ error: 'Server error during Google Sign-In' });
+    }
+});
+
+/**
  * @route   POST /api/auth/login
  * @desc    User login endpoint
  */
