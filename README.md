@@ -51,6 +51,7 @@ The server will start on http://localhost:5001
 ### User Authentication
 - `POST /api/auth/signup` - User registration
 - `POST /api/auth/login` - User login
+- `POST /api/auth/google` - Google login using access_token (Option B)
 
 ### Admin Panel
 - `GET /api/admin/stats` - Dashboard statistics
@@ -91,6 +92,39 @@ When a user submits the signup form:
 - **JWT Tokens**: Secure authentication tokens for logged-in users
 - **Input Validation**: Prevents invalid data from being saved
 - **Duplicate Prevention**: Prevents multiple accounts with same email
+
+## Google OAuth (Option B: access_token)
+
+This backend supports Google login using an access_token received from the frontend via `@react-oauth/google` (`useGoogleLogin`).
+
+- Endpoint: `POST /api/auth/google`
+- Request body:
+  ```json
+  { "token": "<google_access_token>" }
+  ```
+- Behavior:
+  - Calls Google's UserInfo endpoint: `https://www.googleapis.com/oauth2/v3/userinfo` with `Authorization: Bearer <token>`
+  - Creates a user if one does not exist (generates a random hashed password to satisfy schema)
+  - Returns JWT and user info
+
+- Example response:
+  ```json
+  {
+    "message": "Google login successful",
+    "user": {
+      "_id": "...",
+      "name": "Your Name",
+      "email": "you@example.com",
+      "createdAt": "...",
+      "avatar": "https://..."
+    },
+    "token": "<jwt>"
+  }
+  ```
+
+- Requirements:
+  - Node.js v18+ (for global `fetch`). If using older Node, install `node-fetch` and import it.
+  - Frontend must pass `access_token` (not ID token). If using `<GoogleLogin />` instead, switch backend to verify ID tokens.
 
 ## Testing the Signup
 
@@ -136,3 +170,4 @@ Content-Type: application/json
 1. Ensure JWT_SECRET is set in .env
 2. Check if bcryptjs and jsonwebtoken are installed
 3. Verify the signup endpoint is accessible
+4. For Google login, ensure Node v18+ (or add `node-fetch`) and that the frontend sends `access_token` to `/api/auth/google`.
