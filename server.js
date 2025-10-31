@@ -404,24 +404,62 @@ app.post('/api/chat', async (req, res) => {
 
         // For chat with history, use the chat session
         if (Array.isArray(history) && history.length > 0) {
-            const chatHistory = history.map(msg => ({
-                role: msg.sender === 'user' ? 'user' : 'model',
-                parts: [{ text: msg.text }]
-            }));
+            // Filter and validate chat history
+            const validHistory = history
+                .filter(msg => msg && msg.sender && msg.text) // Remove invalid messages
+                .map(msg => ({
+                    role: msg.sender === 'user' ? 'user' : 'model',
+                    parts: [{ text: msg.text }]
+                }));
             
-            const chat = model.startChat({ history: chatHistory });
-            const result = await chat.sendMessage(fullPrompt);
-            const text = result.response.text();
-            
-            let json = null;
-            if (expectJson) {
-                json = extractJsonSnippet(text);
-                if (!json) {
-                    console.warn(`[AI] Failed to parse JSON from model response: ${text}`);
+            // Ensure the first message is from user (Gemini requirement)
+            if (validHistory.length > 0 && validHistory[0].role !== 'user') {
+                console.warn('[AI] First message in history is not from user, using generateContent instead');
+                // Fall back to generateContent if history doesn't start with user
+                const result = await model.generateContent(fullPrompt);
+                const text = result.response.text();
+                
+                let json = null;
+                if (expectJson) {
+                    json = extractJsonSnippet(text);
+                    if (!json) {
+                        console.warn(`[AI] Failed to parse JSON from model response: ${text}`);
+                    }
                 }
-            }
 
-            return res.json({ response: text, modelUsed: GEMINI_MODEL, json });
+                return res.json({ response: text, modelUsed: GEMINI_MODEL, json });
+            }
+            
+            try {
+                const chat = model.startChat({ history: validHistory });
+                const result = await chat.sendMessage(fullPrompt);
+                const text = result.response.text();
+                
+                let json = null;
+                if (expectJson) {
+                    json = extractJsonSnippet(text);
+                    if (!json) {
+                        console.warn(`[AI] Failed to parse JSON from model response: ${text}`);
+                    }
+                }
+
+                return res.json({ response: text, modelUsed: GEMINI_MODEL, json });
+            } catch (historyError) {
+                console.warn('[AI] Chat history error, falling back to generateContent:', historyError.message);
+                // Fall back to generateContent if chat history fails
+                const result = await model.generateContent(fullPrompt);
+                const text = result.response.text();
+                
+                let json = null;
+                if (expectJson) {
+                    json = extractJsonSnippet(text);
+                    if (!json) {
+                        console.warn(`[AI] Failed to parse JSON from model response: ${text}`);
+                    }
+                }
+
+                return res.json({ response: text, modelUsed: GEMINI_MODEL, json });
+            }
         } else {
             // For single message, use generateContent
             const result = await model.generateContent(fullPrompt);
