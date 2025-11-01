@@ -358,6 +358,54 @@ app.post('/api/user/profile', authMiddleware, async (req, res) => {
     }
 });
 
+// --- Helper function to check if message is career-related ---
+function checkIfCareerRelated(message) {
+    if (!message || typeof message !== 'string') return false;
+    
+    const careerKeywords = [
+        // Career-related terms
+        'career', 'job', 'work', 'profession', 'occupation', 'employment', 'workplace',
+        'resume', 'cv', 'interview', 'hiring', 'recruitment', 'application',
+        
+        // Skills and development
+        'skill', 'skills', 'training', 'education', 'learning', 'course', 'certification',
+        'experience', 'qualification', 'competency', 'expertise', 'development',
+        
+        // Industry and roles
+        'industry', 'company', 'business', 'role', 'position', 'title', 'responsibility',
+        'manager', 'engineer', 'developer', 'analyst', 'consultant', 'specialist',
+        
+        // Career guidance terms
+        'advice', 'guidance', 'recommendation', 'suggest', 'help', 'path', 'opportunity',
+        'growth', 'promotion', 'salary', 'benefits', 'transition', 'change',
+        
+        // Professional terms
+        'professional', 'corporate', 'freelance', 'remote', 'office', 'team', 'project',
+        'leadership', 'management', 'networking', 'mentor', 'colleague'
+    ];
+    
+    const messageLower = message.toLowerCase();
+    
+    // Check for career keywords
+    const hasCareerKeywords = careerKeywords.some(keyword => 
+        messageLower.includes(keyword)
+    );
+    
+    // Check for career-related phrases
+    const careerPhrases = [
+        'what should i do', 'what can i do', 'how do i', 'how can i',
+        'i want to', 'i need to', 'help me', 'advice on',
+        'recommend', 'suggest', 'best way to', 'how to become',
+        'career path', 'job market', 'work from home', 'find a job'
+    ];
+    
+    const hasCareerPhrases = careerPhrases.some(phrase => 
+        messageLower.includes(phrase)
+    );
+    
+    return hasCareerKeywords || hasCareerPhrases;
+}
+
 // --- AI Chat Route (Fixed) ---
 app.post('/api/chat', async (req, res) => {
     try {
@@ -390,16 +438,41 @@ app.post('/api/chat', async (req, res) => {
             return null;
         };
 
+        // Check if the message is career-related
+        const isCareerRelated = checkIfCareerRelated(message);
+        
+        if (!isCareerRelated && !expectJson) {
+            return res.json({ 
+                response: "I'm here to help you with career guidance and recommendations. Please ask me questions about careers, job opportunities, skills development, career paths, or professional growth. How can I assist you with your career journey?",
+                modelUsed: GEMINI_MODEL 
+            });
+        }
+
         console.log(`[AI] Using model: ${GEMINI_MODEL}`);
         const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
 
-        // Build the prompt with system instructions
+        // Build the career-focused prompt with system instructions
+        const careerSystemPrompt = `You are Careerion AI, a specialized career guidance assistant. You ONLY provide advice about:
+- Career paths and opportunities
+- Job recommendations based on skills and interests
+- Professional skill development
+- Industry insights and trends
+- Resume and interview guidance
+- Career transitions and growth
+- Educational pathways for careers
+- Workplace advice and professional development
+
+Always respond in a helpful, professional manner focused on career guidance. Do not discuss topics unrelated to careers and professional development.`;
+
         let fullPrompt = message;
         if (systemPrompt) {
-            fullPrompt = `${systemPrompt}\n\n${message}`;
+            fullPrompt = `${careerSystemPrompt}\n\n${systemPrompt}\n\n${message}`;
+        } else {
+            fullPrompt = `${careerSystemPrompt}\n\n${message}`;
         }
+        
         if (expectJson) {
-            fullPrompt = `You are a strict JSON generator. Reply with ONLY valid minified JSON matching the request. No prose, no markdown, no code fences.\n\n${fullPrompt}`;
+            fullPrompt = `You are a strict JSON generator for career recommendations. Reply with ONLY valid minified JSON matching the request. No prose, no markdown, no code fences.\n\n${fullPrompt}`;
         }
 
         // For chat with history, use the chat session
