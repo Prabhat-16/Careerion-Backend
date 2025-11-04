@@ -358,33 +358,80 @@ app.post('/api/user/profile', authMiddleware, async (req, res) => {
     }
 });
 
-// --- Helper function to check if message is career-related ---
+// --- Enhanced career detection and comprehensive response system ---
 function checkIfCareerRelated(message) {
     if (!message || typeof message !== 'string') return false;
     
+    const messageLower = message.toLowerCase();
+    
+    // Comprehensive career keywords
     const careerKeywords = [
-        // Career-related terms
-        'career', 'job', 'work', 'profession', 'occupation', 'employment', 'workplace',
-        'resume', 'cv', 'interview', 'hiring', 'recruitment', 'application',
+        // Core career terms
+        'career', 'job', 'work', 'profession', 'occupation', 'employment', 'workplace', 'vocation',
+        'resume', 'cv', 'interview', 'hiring', 'recruitment', 'application', 'portfolio',
         
         // Skills and development
-        'skill', 'skills', 'training', 'education', 'learning', 'course', 'certification',
-        'experience', 'qualification', 'competency', 'expertise', 'development',
+        'skill', 'skills', 'training', 'education', 'learning', 'course', 'certification', 'certificate',
+        'experience', 'qualification', 'competency', 'expertise', 'development', 'upskill', 'reskill',
+        'bootcamp', 'workshop', 'seminar', 'degree', 'diploma', 'license', 'accreditation',
         
         // Industry and roles
-        'industry', 'company', 'business', 'role', 'position', 'title', 'responsibility',
-        'manager', 'engineer', 'developer', 'analyst', 'consultant', 'specialist',
+        'industry', 'company', 'business', 'role', 'position', 'title', 'responsibility', 'duties',
+        'manager', 'engineer', 'developer', 'analyst', 'consultant', 'specialist', 'coordinator',
+        'director', 'executive', 'supervisor', 'lead', 'senior', 'junior', 'intern', 'apprentice',
         
         // Career guidance terms
-        'advice', 'guidance', 'recommendation', 'suggest', 'help', 'path', 'opportunity',
-        'growth', 'promotion', 'salary', 'benefits', 'transition', 'change',
+        'advice', 'guidance', 'recommendation', 'suggest', 'help', 'path', 'opportunity', 'options',
+        'growth', 'promotion', 'salary', 'benefits', 'transition', 'change', 'switch', 'pivot',
+        'advancement', 'progression', 'future', 'goals', 'planning', 'strategy',
         
         // Professional terms
-        'professional', 'corporate', 'freelance', 'remote', 'office', 'team', 'project',
-        'leadership', 'management', 'networking', 'mentor', 'colleague'
+        'professional', 'corporate', 'freelance', 'remote', 'office', 'team', 'project', 'client',
+        'leadership', 'management', 'networking', 'mentor', 'colleague', 'coworker', 'boss',
+        'startup', 'enterprise', 'nonprofit', 'government', 'public', 'private', 'sector',
+        
+        // Job search and application
+        'apply', 'application', 'jobsearch', 'linkedin', 'indeed', 'glassdoor', 'headhunter',
+        'recruiter', 'hr', 'human resources', 'onboarding', 'probation', 'contract', 'fulltime',
+        'parttime', 'temporary', 'permanent', 'seasonal', 'gig', 'freelancing',
+        
+        // Compensation and benefits
+        'wage', 'income', 'compensation', 'bonus', 'commission', 'equity', 'stock', 'options',
+        'healthcare', 'insurance', 'retirement', '401k', 'pension', 'pto', 'vacation', 'sick leave',
+        
+        // Work environment
+        'culture', 'environment', 'atmosphere', 'values', 'mission', 'vision', 'diversity',
+        'inclusion', 'worklife', 'balance', 'flexibility', 'hybrid', 'onsite', 'wfh',
+        
+        // Performance and evaluation
+        'performance', 'review', 'evaluation', 'feedback', 'goals', 'kpi', 'metrics', 'achievement',
+        'recognition', 'award', 'accomplishment', 'success', 'failure', 'improvement',
+        
+        // Specific fields and technologies
+        'technology', 'software', 'programming', 'coding', 'data', 'analytics', 'marketing',
+        'sales', 'finance', 'accounting', 'design', 'creative', 'healthcare', 'education',
+        'research', 'science', 'engineering', 'manufacturing', 'retail', 'hospitality',
+        'construction', 'agriculture', 'transportation', 'logistics', 'legal', 'law'
     ];
     
-    const messageLower = message.toLowerCase();
+    // Career-related phrases and questions
+    const careerPhrases = [
+        'what should i do', 'what can i do', 'how do i', 'how can i', 'where do i start',
+        'i want to', 'i need to', 'help me', 'advice on', 'guidance on', 'tips for',
+        'recommend', 'suggest', 'best way to', 'how to become', 'how to get into',
+        'career path', 'job market', 'work from home', 'find a job', 'get a job',
+        'change careers', 'switch jobs', 'new field', 'different industry',
+        'improve my', 'develop my', 'learn about', 'study for', 'prepare for',
+        'interview tips', 'resume help', 'cover letter', 'job application',
+        'salary negotiation', 'pay raise', 'promotion', 'advancement',
+        'work experience', 'internship', 'entry level', 'graduate program',
+        'professional development', 'skill building', 'certification program',
+        'industry trends', 'job outlook', 'employment opportunities',
+        'networking tips', 'professional network', 'career fair', 'job fair',
+        'work culture', 'company culture', 'workplace', 'office environment',
+        'remote work', 'freelancing', 'consulting', 'entrepreneurship',
+        'side hustle', 'passive income', 'career goals', 'professional goals'
+    ];
     
     // Check for career keywords
     const hasCareerKeywords = careerKeywords.some(keyword => 
@@ -392,21 +439,186 @@ function checkIfCareerRelated(message) {
     );
     
     // Check for career-related phrases
-    const careerPhrases = [
-        'what should i do', 'what can i do', 'how do i', 'how can i',
-        'i want to', 'i need to', 'help me', 'advice on',
-        'recommend', 'suggest', 'best way to', 'how to become',
-        'career path', 'job market', 'work from home', 'find a job'
-    ];
-    
     const hasCareerPhrases = careerPhrases.some(phrase => 
         messageLower.includes(phrase)
     );
     
-    return hasCareerKeywords || hasCareerPhrases;
+    // Additional context-based detection
+    const questionWords = ['what', 'how', 'where', 'when', 'why', 'which', 'who'];
+    const hasQuestionWord = questionWords.some(word => messageLower.includes(word));
+    
+    // If it's a question and mentions any work-related context, likely career-related
+    const workContext = ['study', 'learn', 'become', 'get', 'find', 'choose', 'decide', 'start'];
+    const hasWorkContext = workContext.some(word => messageLower.includes(word));
+    
+    return hasCareerKeywords || hasCareerPhrases || (hasQuestionWord && hasWorkContext);
 }
 
-// --- AI Chat Route (Fixed) ---
+// --- Enhanced career response generator with comprehensive knowledge base ---
+function generateEnhancedCareerPrompt(message, userProfile = null) {
+    const currentYear = new Date().getFullYear();
+    
+    const basePrompt = `You are Careerion AI, an expert career guidance assistant with comprehensive knowledge across all industries, career paths, and professional development strategies. You have access to current job market data, industry trends, and best practices as of ${currentYear}.
+
+## Your Core Expertise Areas:
+
+### 🎯 Career Exploration & Planning
+- Career assessment and personality-career matching
+- Industry analysis and job market forecasting
+- Career path mapping and milestone planning
+- Skills gap analysis and development roadmaps
+- Career pivot and transition strategies
+
+### 💼 Job Search & Application Strategy
+- Modern resume optimization (ATS-friendly formats)
+- Cover letter personalization techniques
+- LinkedIn profile optimization
+- Interview preparation (behavioral, technical, case studies)
+- Salary research and negotiation tactics
+- Job search automation and tracking systems
+
+### 📈 Professional Development
+- Skills assessment using industry frameworks
+- Certification and training program recommendations
+- Leadership development pathways
+- Personal branding and thought leadership
+- Professional networking strategies
+- Mentorship and coaching guidance
+
+### 🏢 Industry-Specific Guidance
+- Technology: Software development, data science, cybersecurity, AI/ML
+- Healthcare: Clinical roles, healthcare administration, telemedicine
+- Finance: Banking, investment, fintech, accounting
+- Marketing: Digital marketing, content strategy, brand management
+- Education: Teaching, administration, educational technology
+- Engineering: Civil, mechanical, electrical, software engineering
+- Creative: Design, writing, media production, arts management
+- Business: Consulting, project management, operations, strategy
+
+### 💰 Compensation & Benefits
+- Salary benchmarking by role, location, and experience
+- Benefits package evaluation and negotiation
+- Equity compensation understanding
+- Freelance and contract rate setting
+- Career ROI analysis for education and certifications
+
+### 🌐 Modern Work Trends
+- Remote work best practices and opportunities
+- Hybrid work arrangements and productivity
+- Gig economy and freelancing strategies
+- Entrepreneurship and startup guidance
+- Work-life balance and career sustainability
+- Diversity, equity, and inclusion in the workplace
+
+## Response Guidelines:
+1. **COMPREHENSIVE**: Provide detailed, multi-faceted responses that cover all relevant aspects
+2. **ACTIONABLE**: Include specific steps, timelines, and measurable goals
+3. **CURRENT**: Reference ${currentYear} job market trends, salary data, and industry developments
+4. **PERSONALIZED**: Tailor advice based on user's background, goals, and constraints
+5. **RESOURCEFUL**: Suggest specific tools, platforms, courses, and resources
+6. **REALISTIC**: Provide honest assessments of challenges and realistic timelines
+7. **STRUCTURED**: Organize responses with clear headings, bullet points, and logical flow
+
+${userProfile ? `## User Profile Analysis:
+**Educational Background**: ${userProfile.educationLevel || 'Not specified'} in ${userProfile.fieldOfStudy || 'Not specified'} from ${userProfile.institution || 'Not specified'}
+**Career Stage**: ${userProfile.currentStatus || 'Not specified'}
+**Experience Level**: ${userProfile.workExperience || 'Not specified'}
+**Core Skills**: ${Array.isArray(userProfile.skills) && userProfile.skills.length > 0 ? userProfile.skills.join(', ') : 'Not specified'}
+**Interests**: ${Array.isArray(userProfile.interests) && userProfile.interests.length > 0 ? userProfile.interests.join(', ') : 'Not specified'}
+**Career Objectives**: ${userProfile.careerGoals || 'Not specified'}
+**Work Environment Preference**: ${userProfile.preferredWorkEnvironment || 'Not specified'}
+**Location Flexibility**: ${userProfile.preferredWorkLocation || 'Not specified'} (Willing to relocate: ${userProfile.willingToRelocate ? 'Yes' : 'No'})
+**Compensation Expectations**: ${userProfile.salaryExpectations || 'Not specified'}
+
+**Personalization Instructions**: Use this profile to provide highly targeted recommendations that align with the user's background, goals, and preferences. Reference their specific skills and interests when suggesting career paths or development opportunities.` : ''}
+
+## User Question: "${message}"
+
+## Required Response Structure:
+Provide a comprehensive response that includes:
+1. **Direct Answer**: Address the specific question asked
+2. **Detailed Analysis**: Break down the topic with in-depth explanations
+3. **Actionable Steps**: Provide a clear roadmap with specific actions
+4. **Resources & Tools**: Suggest relevant platforms, courses, books, or tools
+5. **Timeline & Milestones**: Include realistic timeframes for achieving goals
+6. **Potential Challenges**: Identify obstacles and how to overcome them
+7. **Success Metrics**: Define how to measure progress and success
+
+Make your response detailed, practical, and immediately useful for career advancement.`;
+
+    return basePrompt;
+}
+
+// --- Enhanced Career Recommendations Route ---
+app.post('/api/career-recommendations', authMiddleware, async (req, res) => {
+    try {
+        if (!process.env.GEMINI_API_KEY) {
+            return res.status(500).json({ error: 'GEMINI_API_KEY is not configured on the server.' });
+        }
+
+        const { query, category } = req.body || {};
+        
+        if (!query) {
+            return res.status(400).json({ error: 'Query is required for career recommendations' });
+        }
+
+        // Get user profile for personalized recommendations
+        const user = await User.findById(req.user.userId).select('profile name email');
+        const userProfile = user?.profile;
+
+        console.log(`[Career Recommendations] Processing query for user: ${user?.email}`);
+        const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+
+        // Enhanced prompt for comprehensive career recommendations
+        const enhancedPrompt = `You are Careerion AI, providing comprehensive career recommendations. 
+
+User Profile:
+- Name: ${user?.name || 'User'}
+- Education: ${userProfile?.educationLevel || 'Not specified'} in ${userProfile?.fieldOfStudy || 'Not specified'}
+- Current Status: ${userProfile?.currentStatus || 'Not specified'}
+- Experience: ${userProfile?.workExperience || 'Not specified'}
+- Skills: ${Array.isArray(userProfile?.skills) ? userProfile.skills.join(', ') : 'Not specified'}
+- Interests: ${Array.isArray(userProfile?.interests) ? userProfile.interests.join(', ') : 'Not specified'}
+- Career Goals: ${userProfile?.careerGoals || 'Not specified'}
+- Work Environment Preference: ${userProfile?.preferredWorkEnvironment || 'Not specified'}
+- Location Preference: ${userProfile?.preferredWorkLocation || 'Not specified'}
+- Salary Expectations: ${userProfile?.salaryExpectations || 'Not specified'}
+
+Query Category: ${category || 'General Career Guidance'}
+User Question: "${query}"
+
+Provide an extremely comprehensive response (minimum 800 words) that includes:
+
+1. **Personalized Analysis** (based on their profile)
+2. **Detailed Recommendations** (specific to their situation)
+3. **Step-by-Step Action Plan** (with timelines)
+4. **Skill Development Roadmap** (specific skills to learn)
+5. **Industry Insights** (current trends and opportunities)
+6. **Networking Strategies** (specific to their field)
+7. **Resource Recommendations** (courses, certifications, books, platforms)
+8. **Salary and Compensation Guidance** (market rates and negotiation tips)
+9. **Potential Career Paths** (multiple options with pros/cons)
+10. **Success Metrics and Milestones** (how to track progress)
+
+Make this response extremely detailed, actionable, and valuable for their career development.`;
+
+        const result = await model.generateContent(enhancedPrompt);
+        const response = result.response.text();
+
+        res.json({ 
+            response,
+            modelUsed: GEMINI_MODEL,
+            userProfile: userProfile ? 'Used for personalization' : 'No profile available',
+            category: category || 'General Career Guidance'
+        });
+
+    } catch (error) {
+        console.error('Error in /api/career-recommendations:', error);
+        res.status(500).json({ error: 'Failed to generate career recommendations' });
+    }
+});
+
+// --- AI Chat Route (Enhanced) ---
 app.post('/api/chat', async (req, res) => {
     try {
         if (!process.env.GEMINI_API_KEY) {
@@ -438,12 +650,41 @@ app.post('/api/chat', async (req, res) => {
             return null;
         };
 
-        // Check if the message is career-related
+        // Check if the message is career-related with enhanced detection
         const isCareerRelated = checkIfCareerRelated(message);
         
         if (!isCareerRelated && !expectJson) {
             return res.json({ 
-                response: "I'm here to help you with career guidance and recommendations. Please ask me questions about careers, job opportunities, skills development, career paths, or professional growth. How can I assist you with your career journey?",
+                response: `I'm Careerion AI, your dedicated career guidance assistant! I'm here to provide comprehensive advice on:
+
+🎯 **Career Exploration & Planning**
+- Discovering career paths that match your interests and skills
+- Industry insights and job market trends
+- Career goal setting and strategic planning
+
+💼 **Job Search & Applications**
+- Resume and cover letter optimization
+- Interview preparation and techniques
+- Job search strategies and networking tips
+
+📈 **Professional Development**
+- Skills assessment and development recommendations
+- Certification and training programs
+- Leadership and management guidance
+
+💰 **Career Advancement**
+- Salary negotiation strategies
+- Promotion and advancement tactics
+- Career transition and pivot guidance
+
+🎓 **Education & Training**
+- Educational pathway recommendations
+- Professional certifications and courses
+- Skill-building resources and programs
+
+Whether you're just starting your career, looking to make a change, or aiming for advancement, I'm here to provide detailed, actionable guidance tailored to your unique situation.
+
+What specific aspect of your career journey would you like to explore today?`,
                 modelUsed: GEMINI_MODEL 
             });
         }
@@ -451,24 +692,23 @@ app.post('/api/chat', async (req, res) => {
         console.log(`[AI] Using model: ${GEMINI_MODEL}`);
         const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
 
-        // Build the career-focused prompt with system instructions
-        const careerSystemPrompt = `You are Careerion AI, a specialized career guidance assistant. You ONLY provide advice about:
-- Career paths and opportunities
-- Job recommendations based on skills and interests
-- Professional skill development
-- Industry insights and trends
-- Resume and interview guidance
-- Career transitions and growth
-- Educational pathways for careers
-- Workplace advice and professional development
+        // Get user profile for personalized recommendations
+        let userProfile = null;
+        if (req.user && req.user.userId) {
+            try {
+                const user = await User.findById(req.user.userId).select('profile');
+                userProfile = user?.profile;
+            } catch (error) {
+                console.log('Could not fetch user profile for personalization:', error.message);
+            }
+        }
 
-Always respond in a helpful, professional manner focused on career guidance. Do not discuss topics unrelated to careers and professional development.`;
-
+        // Generate enhanced career-focused prompt
         let fullPrompt = message;
         if (systemPrompt) {
-            fullPrompt = `${careerSystemPrompt}\n\n${systemPrompt}\n\n${message}`;
+            fullPrompt = `${generateEnhancedCareerPrompt(message, userProfile)}\n\nAdditional Context: ${systemPrompt}`;
         } else {
-            fullPrompt = `${careerSystemPrompt}\n\n${message}`;
+            fullPrompt = generateEnhancedCareerPrompt(message, userProfile);
         }
         
         if (expectJson) {
