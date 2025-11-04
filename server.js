@@ -26,7 +26,30 @@ function authMiddleware(req, res, next) {
             : null;
         if (!token) return res.status(401).json({ error: 'Authorization token missing' });
         const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
-        req.user = decoded; // { userId, email }
+        req.user = decoded; // { userId, email, role }
+        next();
+    } catch (err) {
+        return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+}
+
+// --- Helper: Admin middleware to protect admin routes ---
+function adminMiddleware(req, res, next) {
+    try {
+        const authHeader = req.headers.authorization || '';
+        const token = authHeader.startsWith('Bearer ')
+            ? authHeader.substring('Bearer '.length)
+            : null;
+        if (!token) return res.status(401).json({ error: 'Authorization token missing' });
+        
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
+        req.user = decoded;
+        
+        // Check if user has admin role
+        if (!decoded.role || (decoded.role !== 'admin' && decoded.role !== 'superadmin')) {
+            return res.status(403).json({ error: 'Admin access required' });
+        }
+        
         next();
     } catch (err) {
         return res.status(401).json({ error: 'Invalid or expired token' });
@@ -56,6 +79,9 @@ const userSchema = new mongoose.Schema({
     name: { type: String, required: true },
     email: { type: String, required: true, unique: true },
     password: { type: String, required: true },
+    role: { type: String, enum: ['user', 'admin', 'superadmin'], default: 'user' },
+    isActive: { type: Boolean, default: true },
+    lastLogin: { type: Date },
     // Profile fields expected by frontend
     profile: {
         educationLevel: String,
@@ -74,6 +100,7 @@ const userSchema = new mongoose.Schema({
     },
     profileComplete: { type: Boolean, default: false },
     createdAt: { type: Date, default: Date.now },
+    updatedAt: { type: Date, default: Date.now },
     passwordResetToken: String,
     passwordResetExpires: Date,
 });
@@ -208,15 +235,24 @@ app.post('/api/auth/login', async (req, res) => {
         const isPasswordValid = await bcrypt.compare(password, user.password);
         if (!isPasswordValid) return res.status(401).json({ error: 'Invalid email or password' });
 
+        // Update last login
+        await User.findByIdAndUpdate(user._id, { lastLogin: new Date() });
+
         const token = jwt.sign(
-            { userId: user._id, email: user.email },
+            { userId: user._id, email: user.email, role: user.role || 'user' },
             process.env.JWT_SECRET || 'your-secret-key',
             { expiresIn: '7d' }
         );
 
         res.json({
             message: 'Login successful',
-            user: { _id: user._id, name: user.name, email: user.email, createdAt: user.createdAt },
+            user: { 
+                _id: user._id, 
+                name: user.name, 
+                email: user.email, 
+                role: user.role || 'user',
+                createdAt: user.createdAt 
+            },
             token
         });
     } catch (error) {
@@ -808,30 +844,208 @@ What specific aspect of your career journey would you like to explore today?`,
 
 
 // --- Admin Panel API Routes ---
-app.get('/api/admin/stats', async (req, res) => {
+
+// Admin Dashboard Stats
+app.get('/api/admin/stats', adminMiddleware, async (req, res) => {
     try {
         const totalUsers = await User.countDocuments();
         const totalJobs = await Job.countDocuments();
         const totalCompanies = await Company.countDocuments();
         const totalApplications = await Application.countDocuments();
-        res.json({ totalUsers, totalJobs, totalCompanies, totalApplications });
+        
+        // Additional stats
+        const activeUsers = await User.countDocuments({ isActive: true });
+        const adminUsers = await User.countDocuments({ role: { $in: ['admin', 'superadmin'] } });
+        const recentUsers = await User.countDocuments({ 
+            createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } 
+        });
+        
+        res.json({ 
+            totalUsers, 
+            totalJobs, 
+            totalCompanies, 
+            totalApplications,
+            activeUsers,
+            adminUsers,
+            recentUsers
+        });
     } catch (error) {
         console.error('Error fetching admin stats:', error);
         res.status(500).json({ error: 'Server error fetching stats.' });
     }
 });
 
-app.get('/api/admin/users', async (req, res) => {
+// User Management
+app.get('/api/admin/users', adminMiddleware, async (req, res) => {
     try {
-        const users = await User.find().select('-password');
-        res.json(users);
+        const { page = 1, limit = 10, search = '', role = '' } = req.query;
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+        
+        let query = {};
+        if (search) {
+            query.$or = [
+                { name: { $regex: search, $options: 'i' } },
+                { email: { $regex: search, $options: 'i' } }
+            ];
+        }
+        if (role && role !== 'all') {
+            query.role = role;
+        }
+        
+        const users = await User.find(query)
+            .select('-password')
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(parseInt(limit));
+            
+        const total = await User.countDocuments(query);
+        
+        res.json({
+            users,
+            pagination: {
+                page: parseInt(page),
+                limit: parseInt(limit),
+                total,
+                pages: Math.ceil(total / parseInt(limit))
+            }
+        });
     } catch (error) {
         console.error('Error fetching users:', error);
         res.status(500).json({ error: 'Server error fetching users.' });
     }
 });
 
-app.get('/api/admin/jobs', async (req, res) => {
+// Get single user
+app.get('/api/admin/users/:id', adminMiddleware, async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id).select('-password');
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        res.json(user);
+    } catch (error) {
+        console.error('Error fetching user:', error);
+        res.status(500).json({ error: 'Server error fetching user.' });
+    }
+});
+
+// Create new admin user
+app.post('/api/admin/users', adminMiddleware, async (req, res) => {
+    try {
+        const { name, email, password, role = 'user' } = req.body;
+        
+        if (!name || !email || !password) {
+            return res.status(400).json({ error: 'Name, email, and password are required' });
+        }
+        
+        // Check if user already exists
+        const existingUser = await User.findOne({ email });
+        if (existingUser) {
+            return res.status(400).json({ error: 'User with this email already exists' });
+        }
+        
+        // Only superadmin can create admin users
+        if (role === 'admin' || role === 'superadmin') {
+            if (req.user.role !== 'superadmin') {
+                return res.status(403).json({ error: 'Only superadmin can create admin users' });
+            }
+        }
+        
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const newUser = new User({
+            name,
+            email,
+            password: hashedPassword,
+            role,
+            isActive: true
+        });
+        
+        await newUser.save();
+        
+        // Return user without password
+        const userResponse = newUser.toObject();
+        delete userResponse.password;
+        
+        res.status(201).json({
+            message: 'User created successfully',
+            user: userResponse
+        });
+    } catch (error) {
+        console.error('Error creating user:', error);
+        res.status(500).json({ error: 'Server error creating user.' });
+    }
+});
+
+// Update user
+app.put('/api/admin/users/:id', adminMiddleware, async (req, res) => {
+    try {
+        const { name, email, role, isActive } = req.body;
+        const userId = req.params.id;
+        
+        // Only superadmin can modify admin users
+        const targetUser = await User.findById(userId);
+        if (!targetUser) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        
+        if ((targetUser.role === 'admin' || targetUser.role === 'superadmin') && req.user.role !== 'superadmin') {
+            return res.status(403).json({ error: 'Only superadmin can modify admin users' });
+        }
+        
+        const updateData = {};
+        if (name) updateData.name = name;
+        if (email) updateData.email = email;
+        if (role && req.user.role === 'superadmin') updateData.role = role;
+        if (typeof isActive === 'boolean') updateData.isActive = isActive;
+        updateData.updatedAt = new Date();
+        
+        const updatedUser = await User.findByIdAndUpdate(
+            userId,
+            updateData,
+            { new: true }
+        ).select('-password');
+        
+        res.json({
+            message: 'User updated successfully',
+            user: updatedUser
+        });
+    } catch (error) {
+        console.error('Error updating user:', error);
+        res.status(500).json({ error: 'Server error updating user.' });
+    }
+});
+
+// Delete user
+app.delete('/api/admin/users/:id', adminMiddleware, async (req, res) => {
+    try {
+        const userId = req.params.id;
+        
+        // Prevent self-deletion
+        if (userId === req.user.userId) {
+            return res.status(400).json({ error: 'Cannot delete your own account' });
+        }
+        
+        // Only superadmin can delete admin users
+        const targetUser = await User.findById(userId);
+        if (!targetUser) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        
+        if ((targetUser.role === 'admin' || targetUser.role === 'superadmin') && req.user.role !== 'superadmin') {
+            return res.status(403).json({ error: 'Only superadmin can delete admin users' });
+        }
+        
+        await User.findByIdAndDelete(userId);
+        
+        res.json({ message: 'User deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting user:', error);
+        res.status(500).json({ error: 'Server error deleting user.' });
+    }
+});
+
+// Job Management
+app.get('/api/admin/jobs', adminMiddleware, async (req, res) => {
     try {
         const jobs = await Job.find().sort({ createdAt: -1 });
         res.json(jobs);
@@ -841,7 +1055,70 @@ app.get('/api/admin/jobs', async (req, res) => {
     }
 });
 
-app.get('/api/admin/companies', async (req, res) => {
+app.post('/api/admin/jobs', adminMiddleware, async (req, res) => {
+    try {
+        const { title, company, location, status = 'active' } = req.body;
+        
+        if (!title || !company || !location) {
+            return res.status(400).json({ error: 'Title, company, and location are required' });
+        }
+        
+        const newJob = new Job({
+            title,
+            company,
+            location,
+            status
+        });
+        
+        await newJob.save();
+        res.status(201).json({ message: 'Job created successfully', job: newJob });
+    } catch (error) {
+        console.error('Error creating job:', error);
+        res.status(500).json({ error: 'Server error creating job.' });
+    }
+});
+
+app.put('/api/admin/jobs/:id', adminMiddleware, async (req, res) => {
+    try {
+        const { title, company, location, status } = req.body;
+        const jobId = req.params.id;
+        
+        const updateData = {};
+        if (title) updateData.title = title;
+        if (company) updateData.company = company;
+        if (location) updateData.location = location;
+        if (status) updateData.status = status;
+        
+        const updatedJob = await Job.findByIdAndUpdate(jobId, updateData, { new: true });
+        
+        if (!updatedJob) {
+            return res.status(404).json({ error: 'Job not found' });
+        }
+        
+        res.json({ message: 'Job updated successfully', job: updatedJob });
+    } catch (error) {
+        console.error('Error updating job:', error);
+        res.status(500).json({ error: 'Server error updating job.' });
+    }
+});
+
+app.delete('/api/admin/jobs/:id', adminMiddleware, async (req, res) => {
+    try {
+        const deletedJob = await Job.findByIdAndDelete(req.params.id);
+        
+        if (!deletedJob) {
+            return res.status(404).json({ error: 'Job not found' });
+        }
+        
+        res.json({ message: 'Job deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting job:', error);
+        res.status(500).json({ error: 'Server error deleting job.' });
+    }
+});
+
+// Company Management
+app.get('/api/admin/companies', adminMiddleware, async (req, res) => {
     try {
         const companies = await Company.find().sort({ createdAt: -1 });
         res.json(companies);
@@ -851,7 +1128,70 @@ app.get('/api/admin/companies', async (req, res) => {
     }
 });
 
-app.get('/api/admin/applications', async (req, res) => {
+app.post('/api/admin/companies', adminMiddleware, async (req, res) => {
+    try {
+        const { name, industry, size = 'medium', status = 'active' } = req.body;
+        
+        if (!name || !industry) {
+            return res.status(400).json({ error: 'Name and industry are required' });
+        }
+        
+        const newCompany = new Company({
+            name,
+            industry,
+            size,
+            status
+        });
+        
+        await newCompany.save();
+        res.status(201).json({ message: 'Company created successfully', company: newCompany });
+    } catch (error) {
+        console.error('Error creating company:', error);
+        res.status(500).json({ error: 'Server error creating company.' });
+    }
+});
+
+app.put('/api/admin/companies/:id', adminMiddleware, async (req, res) => {
+    try {
+        const { name, industry, size, status } = req.body;
+        const companyId = req.params.id;
+        
+        const updateData = {};
+        if (name) updateData.name = name;
+        if (industry) updateData.industry = industry;
+        if (size) updateData.size = size;
+        if (status) updateData.status = status;
+        
+        const updatedCompany = await Company.findByIdAndUpdate(companyId, updateData, { new: true });
+        
+        if (!updatedCompany) {
+            return res.status(404).json({ error: 'Company not found' });
+        }
+        
+        res.json({ message: 'Company updated successfully', company: updatedCompany });
+    } catch (error) {
+        console.error('Error updating company:', error);
+        res.status(500).json({ error: 'Server error updating company.' });
+    }
+});
+
+app.delete('/api/admin/companies/:id', adminMiddleware, async (req, res) => {
+    try {
+        const deletedCompany = await Company.findByIdAndDelete(req.params.id);
+        
+        if (!deletedCompany) {
+            return res.status(404).json({ error: 'Company not found' });
+        }
+        
+        res.json({ message: 'Company deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting company:', error);
+        res.status(500).json({ error: 'Server error deleting company.' });
+    }
+});
+
+// Application Management
+app.get('/api/admin/applications', adminMiddleware, async (req, res) => {
     try {
         const applications = await Application.find()
             .populate('jobId', 'title company')
@@ -864,6 +1204,84 @@ app.get('/api/admin/applications', async (req, res) => {
     }
 });
 
+app.put('/api/admin/applications/:id', adminMiddleware, async (req, res) => {
+    try {
+        const { status } = req.body;
+        const applicationId = req.params.id;
+        
+        if (!status) {
+            return res.status(400).json({ error: 'Status is required' });
+        }
+        
+        const updatedApplication = await Application.findByIdAndUpdate(
+            applicationId,
+            { status },
+            { new: true }
+        ).populate('jobId', 'title company').populate('userId', 'name email');
+        
+        if (!updatedApplication) {
+            return res.status(404).json({ error: 'Application not found' });
+        }
+        
+        res.json({ message: 'Application updated successfully', application: updatedApplication });
+    } catch (error) {
+        console.error('Error updating application:', error);
+        res.status(500).json({ error: 'Server error updating application.' });
+    }
+});
+
+// --- Admin User Creation ---
+async function createAdminUser() {
+    try {
+        const adminEmail = 'admin@careerion.com';
+        const superAdminEmail = 'superadmin@careerion.com';
+        
+        // Create superadmin user
+        const existingSuperAdmin = await User.findOne({ email: superAdminEmail });
+        if (!existingSuperAdmin) {
+            const superAdminPassword = await bcrypt.hash('superadmin123', 10);
+            await User.create({
+                name: 'Super Admin',
+                email: superAdminEmail,
+                password: superAdminPassword,
+                role: 'superadmin',
+                isActive: true
+            });
+            console.log('✅ Super Admin user created successfully!');
+            console.log('📧 Email: superadmin@careerion.com');
+            console.log('🔑 Password: superadmin123');
+            console.log('👑 Role: Super Admin (Full Access)');
+        }
+        
+        // Create regular admin user
+        const existingAdmin = await User.findOne({ email: adminEmail });
+        if (!existingAdmin) {
+            const adminPassword = await bcrypt.hash('admin123', 10);
+            await User.create({
+                name: 'Admin User',
+                email: adminEmail,
+                password: adminPassword,
+                role: 'admin',
+                isActive: true
+            });
+            console.log('✅ Admin user created successfully!');
+            console.log('📧 Email: admin@careerion.com');
+            console.log('🔑 Password: admin123');
+            console.log('👤 Role: Admin');
+        }
+        
+        if (existingSuperAdmin && existingAdmin) {
+            console.log('ℹ️  Admin users already exist');
+        }
+        
+        console.log('⚠️  Please change default passwords after first login!');
+        console.log('🌐 Admin Panel URL: http://localhost:3000 (when running)');
+        
+    } catch (error) {
+        console.error('❌ Error creating admin user:', error);
+    }
+}
+
 // --- Sample Data Creation ---
 async function createSampleData() {
     try {
@@ -874,9 +1292,9 @@ async function createSampleData() {
         if (userCount === 0) {
             const pw = await bcrypt.hash('password123', 10);
             await User.create([
-                { name: 'John Doe', email: 'john@example.com', password: pw },
-                { name: 'Jane Smith', email: 'jane@example.com', password: pw },
-                { name: 'Bob Johnson', email: 'bob@example.com', password: pw }
+                { name: 'John Doe', email: 'john@example.com', password: pw, role: 'user' },
+                { name: 'Jane Smith', email: 'jane@example.com', password: pw, role: 'user' },
+                { name: 'Bob Johnson', email: 'bob@example.com', password: pw, role: 'user' }
             ]);
             console.log('Sample users created (with hashed passwords)');
         }
@@ -910,6 +1328,7 @@ function startServer() {
         console.log(`Backend server is running on http://localhost:${port}`);
         console.log('Admin panel available at: http://localhost:5001/api/admin/*');
         console.log('Auth endpoints available at: http://localhost:5001/api/auth/*');
+        createAdminUser(); // Create admin user first
         createSampleData();
     });
 }
