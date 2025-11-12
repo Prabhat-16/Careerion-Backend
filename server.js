@@ -176,8 +176,53 @@ if (!process.env.GEMINI_API_KEY) {
 const _configuredModel = process.env.GEMINI_MODEL || '';
 const _normalizedModel = _configuredModel.replace(/^models\//, '');
 // Recommend a modern, stable model as the default
-const GEMINI_MODEL = _normalizedModel || 'gemini-1.5-flash' || 'gemini-1.5-flash-latest';
-console.log(`Using Gemini model: ${GEMINI_MODEL}${_configuredModel && _configuredModel !== GEMINI_MODEL ? ` (normalized from ${_configuredModel})` : ''}`);
+const PRIMARY_MODEL = _normalizedModel || 'gemini-flash-latest';
+
+// Fallback models in order of preference (only working models)
+const FALLBACK_MODELS = [
+    'gemini-flash-latest',
+    'gemini-2.0-flash',
+    'gemini-2.5-flash'
+];
+
+console.log(`Primary Gemini model: ${PRIMARY_MODEL}${_configuredModel && _configuredModel !== PRIMARY_MODEL ? ` (normalized from ${_configuredModel})` : ''}`);
+console.log(`Fallback models available: ${FALLBACK_MODELS.join(', ')}`);
+
+// Helper function to try multiple models with fallback
+async function generateContentWithFallback(prompt, retryCount = 0) {
+    const modelsToTry = [PRIMARY_MODEL, ...FALLBACK_MODELS.filter(m => m !== PRIMARY_MODEL)];
+    
+    for (let i = 0; i < modelsToTry.length; i++) {
+        const modelName = modelsToTry[i];
+        try {
+            console.log(`[AI] Attempting with model: ${modelName} (attempt ${retryCount + 1})`);
+            const model = genAI.getGenerativeModel({ model: modelName });
+            const result = await model.generateContent(prompt);
+            const text = result.response.text();
+            
+            if (modelName !== PRIMARY_MODEL) {
+                console.log(`[AI] ✅ Success with fallback model: ${modelName}`);
+            }
+            
+            return { text, modelUsed: modelName };
+        } catch (error) {
+            console.log(`[AI] ❌ Model ${modelName} failed: ${error.message}`);
+            
+            // If it's a 503 (overloaded) or 429 (rate limit), try next model
+            if (error.status === 503 || error.status === 429) {
+                console.log(`[AI] Model ${modelName} is overloaded/rate limited, trying next model...`);
+                continue;
+            }
+            
+            // For other errors, if it's the last model, throw the error
+            if (i === modelsToTry.length - 1) {
+                throw error;
+            }
+        }
+    }
+    
+    throw new Error('All models failed or are unavailable');
+}
 
 // Warn if JWT secret is not configured
 if (!process.env.JWT_SECRET) {
@@ -267,7 +312,8 @@ app.get('/api/health', (req, res) => {
     res.json({
         status: 'ok',
         geminiKeyPresent: hasKey,
-        modelConfigured: GEMINI_MODEL,
+        modelConfigured: PRIMARY_MODEL,
+        fallbackModels: FALLBACK_MODELS,
     });
 });
 
@@ -370,11 +416,31 @@ app.get('/api/user/profile', authMiddleware, async (req, res) => {
 
 app.post('/api/user/profile', authMiddleware, async (req, res) => {
     try {
-        const allowedFields = ['educationLevel','fieldOfStudy','institution','yearOfCompletion','currentStatus','workExperience','skills','interests','careerGoals','preferredWorkEnvironment','preferredWorkLocation','salaryExpectations','willingToRelocate'];
+        const allowedFields = ['educationLevel','fieldOfStudy','institution','yearOfCompletion','currentStatus','workExperience','skills','interests','careerGoals','preferredWorkEnvironment','preferredWorkLocation','salaryExpectations','willingToRelocate','technicalSkills','softSkills'];
         const payload = req.body || {};
         const profile = {};
+        
         for (const key of allowedFields) {
-            if (payload[key] !== undefined) profile[key] = payload[key];
+            if (payload[key] !== undefined) {
+                // Process comma-separated skills and interests into arrays
+                if ((key === 'skills' || key === 'interests' || key === 'technicalSkills' || key === 'softSkills') && typeof payload[key] === 'string') {
+                    // Split by comma, trim whitespace, filter empty strings
+                    profile[key] = payload[key]
+                        .split(',')
+                        .map(item => item.trim())
+                        .filter(item => item.length > 0);
+                } else {
+                    profile[key] = payload[key];
+                }
+            }
+        }
+        
+        // Combine technical and soft skills into main skills array for AI processing
+        if (profile.technicalSkills || profile.softSkills) {
+            const allSkills = [];
+            if (Array.isArray(profile.technicalSkills)) allSkills.push(...profile.technicalSkills);
+            if (Array.isArray(profile.softSkills)) allSkills.push(...profile.softSkills);
+            if (allSkills.length > 0) profile.skills = allSkills;
         }
         const profileComplete = Boolean(
             profile.educationLevel && profile.fieldOfStudy && profile.institution && profile.currentStatus && (Array.isArray(profile.skills) ? profile.skills.length > 0 : !!profile.skills) && (Array.isArray(profile.interests) ? profile.interests.length > 0 : !!profile.interests) && profile.careerGoals
@@ -553,13 +619,15 @@ function generateEnhancedCareerPrompt(message, userProfile = null) {
 4. **PERSONALIZED**: Tailor advice based on user's background, goals, and constraints
 5. **RESOURCEFUL**: Suggest specific tools, platforms, courses, and resources
 6. **REALISTIC**: Provide honest assessments of challenges and realistic timelines
-7. **STRUCTURED**: Organize responses with clear headings, bullet points, and logical flow
+7. **CLEAN FORMATTING**: Use simple formatting - **bold** for emphasis, bullet points with -, and clear paragraphs. Avoid excessive markdown.
 
 ${userProfile ? `## User Profile Analysis:
 **Educational Background**: ${userProfile.educationLevel || 'Not specified'} in ${userProfile.fieldOfStudy || 'Not specified'} from ${userProfile.institution || 'Not specified'}
 **Career Stage**: ${userProfile.currentStatus || 'Not specified'}
 **Experience Level**: ${userProfile.workExperience || 'Not specified'}
-**Core Skills**: ${Array.isArray(userProfile.skills) && userProfile.skills.length > 0 ? userProfile.skills.join(', ') : 'Not specified'}
+**Technical Skills**: ${Array.isArray(userProfile.technicalSkills) && userProfile.technicalSkills.length > 0 ? userProfile.technicalSkills.join(', ') : 'Not specified'}
+**Soft Skills**: ${Array.isArray(userProfile.softSkills) && userProfile.softSkills.length > 0 ? userProfile.softSkills.join(', ') : 'Not specified'}
+**All Skills**: ${Array.isArray(userProfile.skills) && userProfile.skills.length > 0 ? userProfile.skills.join(', ') : 'Not specified'}
 **Interests**: ${Array.isArray(userProfile.interests) && userProfile.interests.length > 0 ? userProfile.interests.join(', ') : 'Not specified'}
 **Career Objectives**: ${userProfile.careerGoals || 'Not specified'}
 **Work Environment Preference**: ${userProfile.preferredWorkEnvironment || 'Not specified'}
@@ -580,7 +648,14 @@ Provide a comprehensive response that includes:
 6. **Potential Challenges**: Identify obstacles and how to overcome them
 7. **Success Metrics**: Define how to measure progress and success
 
-Make your response detailed, practical, and immediately useful for career advancement.`;
+Make your response detailed, practical, and immediately useful for career advancement.
+
+**IMPORTANT FORMATTING RULES:**
+- Use **bold text** for key points and section headers
+- Use simple bullet points with - for lists
+- Write in clear, readable paragraphs
+- Avoid complex markdown formatting
+- Keep the response clean and professional`;
 
     return basePrompt;
 }
@@ -603,7 +678,7 @@ app.post('/api/career-recommendations', authMiddleware, async (req, res) => {
         const userProfile = user?.profile;
 
         console.log(`[Career Recommendations] Processing query for user: ${user?.email}`);
-        const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+        const model = genAI.getGenerativeModel({ model: PRIMARY_MODEL });
 
         // Enhanced prompt for comprehensive career recommendations
         const enhancedPrompt = `You are Careerion AI, providing comprehensive career recommendations. 
@@ -613,7 +688,8 @@ User Profile:
 - Education: ${userProfile?.educationLevel || 'Not specified'} in ${userProfile?.fieldOfStudy || 'Not specified'}
 - Current Status: ${userProfile?.currentStatus || 'Not specified'}
 - Experience: ${userProfile?.workExperience || 'Not specified'}
-- Skills: ${Array.isArray(userProfile?.skills) ? userProfile.skills.join(', ') : 'Not specified'}
+- Technical Skills: ${Array.isArray(userProfile?.technicalSkills) ? userProfile.technicalSkills.join(', ') : 'Not specified'}
+- Soft Skills: ${Array.isArray(userProfile?.softSkills) ? userProfile.softSkills.join(', ') : 'Not specified'}
 - Interests: ${Array.isArray(userProfile?.interests) ? userProfile.interests.join(', ') : 'Not specified'}
 - Career Goals: ${userProfile?.careerGoals || 'Not specified'}
 - Work Environment Preference: ${userProfile?.preferredWorkEnvironment || 'Not specified'}
@@ -638,12 +714,12 @@ Provide an extremely comprehensive response (minimum 800 words) that includes:
 
 Make this response extremely detailed, actionable, and valuable for their career development.`;
 
-        const result = await model.generateContent(enhancedPrompt);
-        const response = result.response.text();
+        const result = await generateContentWithFallback(enhancedPrompt);
+        const response = result.text;
 
         res.json({ 
             response,
-            modelUsed: GEMINI_MODEL,
+            modelUsed: result.modelUsed,
             userProfile: userProfile ? 'Used for personalization' : 'No profile available',
             category: category || 'General Career Guidance'
         });
@@ -721,12 +797,12 @@ app.post('/api/chat', async (req, res) => {
 Whether you're just starting your career, looking to make a change, or aiming for advancement, I'm here to provide detailed, actionable guidance tailored to your unique situation.
 
 What specific aspect of your career journey would you like to explore today?`,
-                modelUsed: GEMINI_MODEL 
+                modelUsed: PRIMARY_MODEL 
             });
         }
 
-        console.log(`[AI] Using model: ${GEMINI_MODEL}`);
-        const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+        console.log(`[AI] Using model: ${PRIMARY_MODEL}`);
+        const model = genAI.getGenerativeModel({ model: PRIMARY_MODEL });
 
         // Get user profile for personalized recommendations
         let userProfile = null;
@@ -765,8 +841,8 @@ What specific aspect of your career journey would you like to explore today?`,
             if (validHistory.length > 0 && validHistory[0].role !== 'user') {
                 console.warn('[AI] First message in history is not from user, using generateContent instead');
                 // Fall back to generateContent if history doesn't start with user
-                const result = await model.generateContent(fullPrompt);
-                const text = result.response.text();
+                const result = await generateContentWithFallback(fullPrompt);
+                const text = result.text;
                 
                 let json = null;
                 if (expectJson) {
@@ -776,43 +852,50 @@ What specific aspect of your career journey would you like to explore today?`,
                     }
                 }
 
-                return res.json({ response: text, modelUsed: GEMINI_MODEL, json });
+                return res.json({ response: text, modelUsed: result.modelUsed, json });
             }
             
-            try {
-                const chat = model.startChat({ history: validHistory });
-                const result = await chat.sendMessage(fullPrompt);
-                const text = result.response.text();
-                
-                let json = null;
-                if (expectJson) {
-                    json = extractJsonSnippet(text);
-                    if (!json) {
-                        console.warn(`[AI] Failed to parse JSON from model response: ${text}`);
+            // Try chat history with fallback models
+            const modelsToTry = [PRIMARY_MODEL, ...FALLBACK_MODELS.filter(m => m !== PRIMARY_MODEL)];
+            let chatSuccess = false;
+            let chatResult = null;
+            
+            for (const modelName of modelsToTry) {
+                try {
+                    console.log(`[AI] Attempting chat history with model: ${modelName}`);
+                    const model = genAI.getGenerativeModel({ model: modelName });
+                    const chat = model.startChat({ history: validHistory });
+                    const result = await chat.sendMessage(fullPrompt);
+                    const text = result.response.text();
+                    
+                    chatResult = { text, modelUsed: modelName };
+                    chatSuccess = true;
+                    break;
+                } catch (error) {
+                    console.log(`[AI] Chat history failed with ${modelName}: ${error.message}`);
+                    if (error.status === 503 || error.status === 429) {
+                        continue; // Try next model
                     }
+                    break; // For other errors, fall back to generateContent
                 }
-
-                return res.json({ response: text, modelUsed: GEMINI_MODEL, json });
-            } catch (historyError) {
-                console.warn('[AI] Chat history error, falling back to generateContent:', historyError.message);
-                // Fall back to generateContent if chat history fails
-                const result = await model.generateContent(fullPrompt);
-                const text = result.response.text();
-                
-                let json = null;
-                if (expectJson) {
-                    json = extractJsonSnippet(text);
-                    if (!json) {
-                        console.warn(`[AI] Failed to parse JSON from model response: ${text}`);
-                    }
-                }
-
-                return res.json({ response: text, modelUsed: GEMINI_MODEL, json });
             }
-        } else {
-            // For single message, use generateContent
-            const result = await model.generateContent(fullPrompt);
-            const text = result.response.text();
+            
+            if (chatSuccess) {
+                let json = null;
+                if (expectJson) {
+                    json = extractJsonSnippet(chatResult.text);
+                    if (!json) {
+                        console.warn(`[AI] Failed to parse JSON from model response: ${chatResult.text}`);
+                    }
+                }
+
+                return res.json({ response: chatResult.text, modelUsed: chatResult.modelUsed, json });
+            }
+            
+            // If chat history failed, fall back to generateContent
+            console.warn('[AI] Chat history failed with all models, falling back to generateContent');
+            const result = await generateContentWithFallback(fullPrompt);
+            const text = result.text;
             
             let json = null;
             if (expectJson) {
@@ -822,20 +905,38 @@ What specific aspect of your career journey would you like to explore today?`,
                 }
             }
 
-            return res.json({ response: text, modelUsed: GEMINI_MODEL, json });
+            return res.json({ response: text, modelUsed: result.modelUsed, json });
+        } else {
+            // For single message, use generateContent
+            const result = await generateContentWithFallback(fullPrompt);
+            const text = result.text;
+            
+            let json = null;
+            if (expectJson) {
+                json = extractJsonSnippet(text);
+                if (!json) {
+                    console.warn(`[AI] Failed to parse JSON from model response: ${text}`);
+                }
+            }
+
+            return res.json({ response: text, modelUsed: result.modelUsed, json });
         }
 
     } catch (error) {
-        console.error(`Error in /api/chat with model ${GEMINI_MODEL}:`, error);
+        console.error(`Error in /api/chat:`, error);
         
         // Provide more specific error messages
-        let errorMessage = 'Failed to get response from AI. Check server logs.';
+        let errorMessage = 'Failed to get response from AI. Please try again in a moment.';
         if (error.message?.includes('API_KEY')) {
             errorMessage = 'Invalid API key. Please check your Gemini API key configuration.';
-        } else if (error.message?.includes('quota')) {
+        } else if (error.message?.includes('quota') || error.status === 429) {
             errorMessage = 'API quota exceeded. Please try again later.';
+        } else if (error.message?.includes('overloaded') || error.status === 503) {
+            errorMessage = 'AI service is temporarily overloaded. Please try again in a few moments.';
         } else if (error.message?.includes('model')) {
-            errorMessage = 'Invalid model specified. Please check the model configuration.';
+            errorMessage = 'AI model configuration issue. Please try again.';
+        } else if (error.message?.includes('All models failed')) {
+            errorMessage = 'All AI models are currently unavailable. Please try again later.';
         }
         
         res.status(500).json({ error: errorMessage });
