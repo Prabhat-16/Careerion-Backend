@@ -1331,6 +1331,115 @@ app.put('/api/admin/applications/:id', adminMiddleware, async (req, res) => {
     }
 });
 
+// Add sample data for testing (development only)
+app.post('/api/admin/sample-data', adminMiddleware, async (req, res) => {
+    try {
+        // Check if we already have sample data
+        const existingUsers = await User.countDocuments({ email: { $regex: 'sample' } });
+        if (existingUsers > 0) {
+            return res.json({ message: 'Sample data already exists' });
+        }
+
+        // Create sample users
+        const sampleUsers = [
+            {
+                name: 'John Smith',
+                email: 'john.sample@example.com',
+                password: await bcrypt.hash('password123', 10),
+                profile: {
+                    educationLevel: "Bachelor's Degree",
+                    fieldOfStudy: 'Computer Science',
+                    currentStatus: 'Employed',
+                    workExperience: '3-5 years',
+                    skills: ['JavaScript', 'React', 'Node.js', 'Python'],
+                    interests: ['Technology', 'AI', 'Web Development'],
+                    careerGoals: 'Become a senior software engineer and eventually lead a development team'
+                },
+                profileComplete: true
+            },
+            {
+                name: 'Sarah Johnson',
+                email: 'sarah.sample@example.com',
+                password: await bcrypt.hash('password123', 10),
+                profile: {
+                    educationLevel: "Master's Degree",
+                    fieldOfStudy: 'Business Administration',
+                    currentStatus: 'Unemployed',
+                    workExperience: '5-10 years',
+                    skills: ['Project Management', 'Marketing', 'Data Analysis', 'Leadership'],
+                    interests: ['Business Strategy', 'Marketing', 'Consulting'],
+                    careerGoals: 'Transition into a product management role at a tech company'
+                },
+                profileComplete: true
+            },
+            {
+                name: 'Mike Chen',
+                email: 'mike.sample@example.com',
+                password: await bcrypt.hash('password123', 10),
+                profile: {
+                    educationLevel: "Bachelor's Degree",
+                    fieldOfStudy: 'Mechanical Engineering',
+                    currentStatus: 'Student',
+                    workExperience: '0-1 years',
+                    skills: ['CAD', 'MATLAB', 'Problem Solving', 'Teamwork'],
+                    interests: ['Engineering', 'Innovation', 'Sustainability'],
+                    careerGoals: 'Work in renewable energy and sustainable technology development'
+                },
+                profileComplete: true
+            },
+            {
+                name: 'Emily Davis',
+                email: 'emily.sample@example.com',
+                password: await bcrypt.hash('password123', 10),
+                profile: {
+                    educationLevel: "Associate Degree",
+                    fieldOfStudy: 'Graphic Design',
+                    currentStatus: 'Freelancer',
+                    workExperience: '1-3 years',
+                    skills: ['Adobe Creative Suite', 'UI/UX Design', 'Branding', 'Typography'],
+                    interests: ['Design', 'Art', 'Digital Media'],
+                    careerGoals: 'Build a successful design agency and work with major brands'
+                },
+                profileComplete: true
+            }
+        ];
+
+        await User.insertMany(sampleUsers);
+
+        // Create sample companies
+        const sampleCompanies = [
+            { name: 'TechCorp Inc.', industry: 'Technology', size: 'large', status: 'active' },
+            { name: 'Design Studio Pro', industry: 'Creative', size: 'small', status: 'active' },
+            { name: 'Green Energy Solutions', industry: 'Energy', size: 'medium', status: 'active' },
+            { name: 'Business Consulting Group', industry: 'Consulting', size: 'medium', status: 'active' }
+        ];
+
+        await Company.insertMany(sampleCompanies);
+
+        // Create sample jobs
+        const companies = await Company.find();
+        const sampleJobs = [
+            { title: 'Senior Software Engineer', company: companies[0]._id, location: 'San Francisco, CA', status: 'active' },
+            { title: 'Product Manager', company: companies[0]._id, location: 'Remote', status: 'active' },
+            { title: 'UI/UX Designer', company: companies[1]._id, location: 'New York, NY', status: 'active' },
+            { title: 'Mechanical Engineer', company: companies[2]._id, location: 'Austin, TX', status: 'active' },
+            { title: 'Business Analyst', company: companies[3]._id, location: 'Chicago, IL', status: 'active' }
+        ];
+
+        await Job.insertMany(sampleJobs);
+
+        res.json({ 
+            message: 'Sample data created successfully',
+            users: sampleUsers.length,
+            companies: sampleCompanies.length,
+            jobs: sampleJobs.length
+        });
+    } catch (error) {
+        console.error('Error creating sample data:', error);
+        res.status(500).json({ error: 'Failed to create sample data' });
+    }
+});
+
 // --- Admin User Creation ---
 async function createAdminUser() {
     try {
