@@ -808,11 +808,26 @@ What specific aspect of your career journey would you like to explore today?`,
         let userProfile = null;
         if (req.user && req.user.userId) {
             try {
-                const user = await User.findById(req.user.userId).select('profile');
+                const user = await User.findById(req.user.userId).select('profile profileComplete');
                 userProfile = user?.profile;
+                
+                if (userProfile) {
+                    console.log(`[AI] Using user profile for personalization:`, {
+                        complete: user.profileComplete,
+                        education: userProfile.educationLevel,
+                        field: userProfile.fieldOfStudy,
+                        status: userProfile.currentStatus,
+                        skillsCount: userProfile.skills?.length || 0,
+                        interestsCount: userProfile.interests?.length || 0
+                    });
+                } else {
+                    console.log('[AI] No user profile found, using generic recommendations');
+                }
             } catch (error) {
                 console.log('Could not fetch user profile for personalization:', error.message);
             }
+        } else {
+            console.log('[AI] No authenticated user, using generic recommendations');
         }
 
         // Generate enhanced career-focused prompt
